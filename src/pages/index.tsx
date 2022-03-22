@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { GetStaticProps } from 'next';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -8,8 +9,7 @@ import { getPrismicClient } from '../services/prismic';
 
 import { FiCalendar, FiUser } from 'react-icons/fi';
 
-import { format } from 'date-fns';
-import ptBR from 'date-fns/locale/pt-BR';
+import { formatDate } from '../utils/formatDate';
 
 import commonStyles from '../styles/common.module.scss';
 import styles from './home.module.scss';
@@ -37,7 +37,25 @@ interface PostsProps {
   posts: Post[];
 }
 
-export default function Home({ posts }: PostsProps) {
+export default function Home({ postsPagination }: HomeProps) {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [prismicNextPage, setPrismicNextPage] = useState('');
+
+  useEffect(() => {
+    setPosts(postsPagination.results);
+    setPrismicNextPage(postsPagination.next_page);
+  }, [postsPagination])
+
+  function handleGetMorePost(): void {
+    fetch(prismicNextPage)
+    .then(response => response.json())
+    .then(data => {
+      setPrismicNextPage(data.next_page);
+      const newPosts = data.results;
+
+      setPosts([...posts, ...newPosts]);
+    })
+  }
   return (
     <>
       <Head>
@@ -54,7 +72,7 @@ export default function Home({ posts }: PostsProps) {
                 <div>
                   <time>
                     <FiCalendar />
-                    {post.first_publication_date}
+                    {formatDate(post.first_publication_date)}
                   </time>
                   <span>
                     <FiUser />
@@ -64,6 +82,18 @@ export default function Home({ posts }: PostsProps) {
               </a>
             </Link>
           ))}
+
+          {prismicNextPage && (
+            <div>
+              <button 
+                type='button' 
+                onClick={handleGetMorePost}
+                className={styles.btnGetMorePost}  
+              >
+                Carregar mais posts
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </>
@@ -73,22 +103,19 @@ export default function Home({ posts }: PostsProps) {
 export const getStaticProps: GetStaticProps = async () => {
   const prismic = getPrismicClient();
 
-  const postResponse = await prismic.query(
+  const postsResponse = await prismic.query(
     [Prismic.predicates.at('document.type', 'posts')],
     {
       fetch: ['posts.title', 'posts.subtitle', 'posts.author'],
-      pageSize: 2,
+      pageSize: 1,
+      page: 1,
     }
   );
 
-  const posts = postResponse.results.map(post => {
+  const posts: Post[] = postsResponse.results.map(post => {
     return {
       uid: post.uid,
-      first_publication_date: format(
-        new Date(post.first_publication_date),
-        'dd MMM yyyy',
-        { locale: ptBR }
-      ),
+      first_publication_date: post.first_publication_date,
       data: {
         title: post.data.title,
         subtitle: post.data.subtitle,
@@ -99,8 +126,11 @@ export const getStaticProps: GetStaticProps = async () => {
 
   return {
     props: {
-      posts,
+      postsPagination: {
+        next_page: postsResponse.next_page,
+        results: posts,
+      }
     },
-    revalidate: 60 * 30 // 30 minutes
+    revalidate: 60 * 60 * 8 // 8 hours
   };
 };
